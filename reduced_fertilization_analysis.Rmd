@@ -1,0 +1,1606 @@
+---
+title: "Reduced fertilization analysis"
+author: "Yeimy Montenegro"
+output: html_document
+---
+
+The following script presents all the analyses conducted on microbiological and soil data, as described in Sections 3.3 and 3.4 of the paper.
+
+# 1. Upload files
+```{r files}
+ps_clean <- readRDS("/Pippn_data/homes/yamontenegro/datos_rizosfera/16S/datos_procesados_2026/ps_clean.Rds")
+ps_ITS_clean <- readRDS("/Pippn_data/homes/yamontenegro/datos_rizosfera/ITS/datos_procesados_2026/ps_ITS_clean.Rds")
+```
+# 2. Counts
+```{r counts}
+library(phyloseq)
+
+total_reads_bac <- sum(phyloseq::otu_table(ps_clean))
+total_reads_bac
+
+total_reads_fun <- sum(phyloseq::otu_table(ps_ITS_clean))
+total_reads_fun
+
+print("-----------Reads Bacterias -------------")
+reads_por_muestra <- sample_sums(ps_clean)
+
+
+sort(reads_por_muestra)
+
+# Mín and max
+min_reads <- min(reads_por_muestra)
+max_reads <- max(reads_por_muestra)
+
+min_reads
+max_reads
+
+print("-----------Reads Hongos -------------")
+reads_por_muestra <- sample_sums(ps_ITS_clean)
+
+sort(reads_por_muestra)
+
+# Mín and max
+min_reads <- min(reads_por_muestra)
+max_reads <- max(reads_por_muestra)
+
+min_reads
+max_reads
+
+print("-----------Asignación de ASVs -------------")
+
+otu <- as(otu_table(ps_clean), "matrix") #ASVs table
+
+asvs_por_muestra <- rowSums(otu > 0)
+
+print("mean ASV/ sample bac")
+mean(asvs_por_muestra)
+
+#fungi
+otu <- as(otu_table(ps_ITS_clean), "matrix") #ASVs table
+
+asvs_por_muestra <- rowSums(otu > 0)
+
+print("mean ASV/ sample fun")
+mean(asvs_por_muestra)
+
+```
+
+# 3. rarefaction curves
+```{r rare_curve bac}
+library(phyloseq)
+library(vegan)
+library(ggplot2)
+library(dplyr)
+
+otu_mat <- as.data.frame(otu_table(ps_clean)) #Matrix
+
+min_depth <- min(rowSums(otu_mat))
+
+sample_names_vec <- rownames(otu_mat)#sample names
+
+# Generar rarefacción
+rare_list <- rarecurve(otu_mat,
+                       step = 100,
+                       sample = min_depth,
+                       label = FALSE)
+
+# dataframe
+rare_df <- do.call(rbind, lapply(seq_along(rare_list), function(i){
+
+  richness_values <- rare_list[[i]]
+  reads_values <- attr(rare_list[[i]], "Subsample")
+
+  data.frame(
+    Sample = sample_names_vec[i],
+    Reads = reads_values,
+    Richness = richness_values
+  )
+}))
+
+# Plot
+pr_16s<-ggplot(rare_df, aes(x = Reads, y = Richness, group = Sample)) +
+  geom_line(alpha = 0.4, linewidth = 0.6) +
+  theme_classic(base_size = 14) +
+  labs(title = "16S Rarefaction Curves",
+       x = "Sequencing depth (reads)",
+       y = "Observed ASVs") +
+  theme(plot.title = element_text(hjust = 0.5))
+pr_16s
+```
+
+```{r rare_curve fun}
+library(phyloseq)
+library(vegan)
+library(ggplot2)
+library(dplyr)
+
+otu_mat <- as.data.frame(otu_table(ps_ITS_clean)) #Matrix
+
+min_depth <- min(rowSums(otu_mat))
+
+sample_names_vec <- rownames(otu_mat)#sample names
+
+# Generar rarefacción
+rare_list <- rarecurve(otu_mat,
+                       step = 100,
+                       sample = min_depth,
+                       label = FALSE)
+
+# dataframe
+rare_df <- do.call(rbind, lapply(seq_along(rare_list), function(i){
+
+  richness_values <- rare_list[[i]]
+  reads_values <- attr(rare_list[[i]], "Subsample")
+
+  data.frame(
+    Sample = sample_names_vec[i],
+    Reads = reads_values,
+    Richness = richness_values
+  )
+}))
+
+# Plot
+pr_ITS <-ggplot(rare_df, aes(x = Reads, y = Richness, group = Sample)) +
+  geom_line(alpha = 0.4, linewidth = 0.6) +
+  theme_classic(base_size = 14) +
+  labs(title = "ITS Rarefaction Curves",
+       x = "Sequencing depth (reads)",
+       y = "Observed ASVs") +
+  theme(plot.title = element_text(hjust = 0.5))
+pr_ITS
+```
+```{r, multiplot}
+#install.packages("patchwork")
+library(patchwork)
+final_fig_rare <- (pr_16s|pr_ITS)
+
+final_fig_rare
+
+
+#Pdf
+pdf("Rarefraction_curves.pdf", width = 12, height = 5)
+print(final_fig_rare)
+dev.off()
+
+#Png
+ggsave("Rarefraction_curves.png",
+       plot = final_fig_rare,
+       width = 12,
+       height = 5,
+       dpi = 300)
+
+
+#tiff
+ggsave("Rarefraction_curves.tiff",
+       plot = final_fig_rare,
+       width = 12,
+       height = 5,
+       dpi = 300,
+       compression = "lzw")
+```
+
+#---------------------- Ecological analysis ---------------------
+```{r palette}
+palette_treat <- c(
+   "Mock" = "#0072B2",
+  "Organic" = "#00913F",
+  "NPK" = "#D55E00"
+)
+
+palette_blo <- c(
+  "1" = "#56B4E9",
+  "2" = "#009E73",
+  "3" = "#E69F00",
+  "4" = "#CC79A7",
+  "5" = "#0072B2" 
+)
+
+palette_time <- c(
+  "T0" = "#12B9E5",
+  "T1" = "#CC69A7"
+)
+```
+
+# Fig. IV
+
+```{r p_p_bac}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(plotly)
+library(stringr)
+library(tidyr)
+
+# dataframe
+phylum_bac <- ps_clean %>%
+  tax_glom(taxrank = "Phylum") %>%
+  transform_sample_counts(function(x) x / sum(x)) %>%
+  psmelt() %>%
+  as.data.frame() %>%
+  mutate(
+    Phylum = as.character(Phylum),
+    Abundance = as.numeric(Abundance)
+  )
+
+# Top phyla + "Other"
+top_phyla <- phylum_bac %>%
+  group_by(Phylum) %>%
+  summarise(total = sum(Abundance, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>% # top 10 
+  pull(Phylum)
+
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Phylum = ifelse(Phylum %in% top_phyla, Phylum, "Other")
+  )
+
+# change treatments
+phylum_bac <- phylum_bac %>%
+  separate(Sample, into = c("Samplingtime", "Treatment", "Block"), sep = "_") %>%
+  mutate(
+   Treatment = as.character(Treatment),
+    Treatment = ifelse(Treatment == "H20", "Mock", Treatment),
+    Treatment = ifelse(Treatment == "ECO", "Organic", Treatment),
+    Samplingtime = factor(Samplingtime, levels = c("T0", "T1")),
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Block = factor(Block)
+  )
+
+# order phylum and sample
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Phylum = factor(
+      Phylum,
+      levels = phylum_bac %>%
+        group_by(Phylum) %>%
+        summarise(total = sum(Abundance), .groups = "drop") %>%
+        arrange(desc(total)) %>%
+        pull(Phylum)
+    ),
+    Sample_order = interaction(Treatment, Block, sep = "_"),
+    Sample_order = factor(
+      Sample_order,
+      levels = unique(Sample_order[order(Treatment, Block)])
+    )
+  )
+
+# palette
+my_colors <- c("#0072B2", "#00913F", "#D55E00", "#0032D5", "#911100",
+               "#B23B00", "#00A191", "#AAB300", "#EDAA25", "#0A7373")
+
+# plot
+p_p_bac <- ggplot(phylum_bac,
+                  aes(x = Sample_order,
+                      y = Abundance,
+                      fill = Phylum)) +
+
+  geom_bar(stat = "identity", position = "fill") +
+
+  facet_grid(~Samplingtime, scales = "free_x") +
+
+  scale_y_continuous(labels = percent) +
+  labs(x = "Sample", y = "Relative Abundance (%)", title = "A") +
+
+  scale_fill_manual(
+    values = rep(my_colors, length.out = nlevels(phylum_bac$Phylum))
+  ) +
+
+  scale_x_discrete(labels = function(x) str_replace(x, "_.*", "")) +
+
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(size = 10, face = "bold"),
+    panel.spacing.x = unit(0.1, "lines"),
+
+    legend.position = "right",
+    legend.text = element_text(size = 7, face = "bold"),
+    legend.title = element_text(size = 8, face = "bold"),
+
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 7, face = "bold", color = "black"),
+    axis.text.y = element_text(face = "bold", colour = "black"),
+    axis.title = element_text(face = "bold")
+  ) +
+  guides(fill = guide_legend(ncol = 1))
+p_p_bac
+```
+
+```{r p_p_fun}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(plotly)
+library(stringr)
+library(tidyr)
+
+# dataframe
+phylum_bac <- ps_ITS_clean %>%
+  tax_glom(taxrank = "Phylum") %>%
+  transform_sample_counts(function(x) x / sum(x)) %>%
+  psmelt() %>%
+  as.data.frame() %>%
+  mutate(
+    Phylum = as.character(Phylum),
+    Abundance = as.numeric(Abundance)
+  )
+
+# Top phyla + "Other"
+top_phyla <- phylum_bac %>%
+  group_by(Phylum) %>%
+  summarise(total = sum(Abundance, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>% # top 10 
+  pull(Phylum)
+
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Phylum = ifelse(Phylum %in% top_phyla, Phylum, "Other")
+  )
+
+# change treatments
+phylum_bac <- phylum_bac %>%
+  separate(Sample, into = c("Samplingtime", "Treatment", "Block"), sep = "_") %>%
+  mutate(
+   Treatment = as.character(Treatment),
+    Treatment = ifelse(Treatment == "H20", "Mock", Treatment),
+    Treatment = ifelse(Treatment == "ECO", "Organic", Treatment),
+    Samplingtime = factor(Samplingtime, levels = c("T0", "T1")),
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Block = factor(Block)
+  )
+
+#Edit names
+phylum_bac$Phylum <- phylum_bac$Phylum %>%
+  str_replace("^p__", "") %>%
+  str_replace("^g__", "") %>%
+  #str_replace("^f__", "") %>%
+  str_replace("Fungi_phy_Incertae_sedis", "Unclassified Fungi") %>%
+  str_replace("Fungi_gen_Incertae_sedis", "Unclassified Fungi")%>%
+  str_replace("Chytridiomycota_gen_Incertae_sedis", "Unclassified Chytridiomycota")
+
+
+# order phylum and sample
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Phylum = factor(
+      Phylum,
+      levels = phylum_bac %>%
+        group_by(Phylum) %>%
+        summarise(total = sum(Abundance), .groups = "drop") %>%
+        arrange(desc(total)) %>%
+        pull(Phylum)
+    ),
+    Sample_order = interaction(Treatment, Block, sep = "_"),
+    Sample_order = factor(
+      Sample_order,
+      levels = unique(Sample_order[order(Treatment, Block)])
+    )
+  )
+
+# palette
+my_colors <- c("#0072B2", "#00913F", "#D55E00", "#0032D5", "#911100",
+               "#B23B00", "#00A191", "#AAB300", "#EDAA25", "#0A7373")
+
+# plot
+p_p_fun <- ggplot(phylum_bac,
+                  aes(x = Sample_order,
+                      y = Abundance,
+                      fill = Phylum)) +
+
+  geom_bar(stat = "identity", position = "fill") +
+
+  facet_grid(~Samplingtime, scales = "free_x") +
+
+  scale_y_continuous(labels = percent) +
+  labs(x = "Sample", y = "Relative Abundance (%)", title = "A") +
+
+  scale_fill_manual(
+    values = rep(my_colors, length.out = nlevels(phylum_bac$Phylum))
+  ) +
+
+  scale_x_discrete(labels = function(x) str_replace(x, "_.*", "")) +
+
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(size = 10, face = "bold"),
+    panel.spacing.x = unit(0.1, "lines"),
+
+    legend.position = "right",
+    legend.text = element_text(size = 7, face = "bold"),
+    legend.title = element_text(size = 8, face = "bold"),
+
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 7, face = "bold", color = "black"),
+    axis.text.y = element_text(face = "bold", colour = "black"),
+    axis.title = element_text(face = "bold")
+  ) +
+  guides(fill = guide_legend(ncol = 1))
+
+p_p_fun
+```
+
+
+```{r p_g_bac}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(plotly)
+library(stringr)
+library(tidyr)
+
+# dataframe
+phylum_bac <- ps_clean %>%
+  tax_glom(taxrank = "Genus") %>%
+  transform_sample_counts(function(x) x / sum(x)) %>%
+  psmelt() %>%
+  as.data.frame() %>%
+  mutate(
+    Genus = as.character(Genus),
+    Abundance = as.numeric(Abundance)
+  )
+
+# Top phyla + "Other"
+top_phyla <- phylum_bac %>%
+  group_by(Genus) %>%
+  summarise(total = sum(Abundance, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>% # top 10 
+  pull(Genus)
+
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Genus = ifelse(Genus %in% top_phyla, Genus, "Other")
+  )
+
+# change treatments
+phylum_bac <- phylum_bac %>%
+  separate(Sample, into = c("Samplingtime", "Treatment", "Block"), sep = "_") %>%
+  mutate(
+   Treatment = as.character(Treatment),
+    Treatment = ifelse(Treatment == "H20", "Mock", Treatment),
+    Treatment = ifelse(Treatment == "ECO", "Organic", Treatment),
+    Samplingtime = factor(Samplingtime, levels = c("T0", "T1")),
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Block = factor(Block)
+  )
+
+#Edit names
+phylum_bac$Genus <- phylum_bac$Genus %>%
+  str_replace("Burkholderia-Caballeronia-Paraburkholderia", "Unclassified Burkholderiaceae")
+
+
+# order phylum and sample
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Genus = factor(
+      Genus,
+      levels = phylum_bac %>%
+        group_by(Genus) %>%
+        summarise(total = sum(Abundance), .groups = "drop") %>%
+        arrange(desc(total)) %>%
+        pull(Genus)
+    ),
+    Sample_order = interaction(Treatment, Block, sep = "_"),
+    Sample_order = factor(
+      Sample_order,
+      levels = unique(Sample_order[order(Treatment, Block)])
+    )
+  )
+
+# palette
+my_colors <- c("#0072B2", "#00913F", "#D55E00", "#0032D5", "#911100",
+               "#B23B00", "#00A191", "#AAB300", "#EDAA25", "#0A7373")
+
+# plot
+p_g_bac <- ggplot(phylum_bac,
+                  aes(x = Sample_order,
+                      y = Abundance,
+                      fill = Genus)) +
+
+  geom_bar(stat = "identity", position = "fill") +
+
+  facet_grid(~Samplingtime, scales = "free_x") +
+
+  scale_y_continuous(labels = percent) +
+  labs(x = "Sample", y = "Relative Abundance (%)", title = "C") +
+
+  scale_fill_manual(
+    values = rep(my_colors, length.out = nlevels(phylum_bac$Genus))
+  ) +
+
+  scale_x_discrete(labels = function(x) str_replace(x, "_.*", "")) +
+
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(size = 10, face = "bold"),
+    panel.spacing.x = unit(0.1, "lines"),
+
+    legend.position = "right",
+    legend.text = element_text(size = 7, face = "bold"),
+    legend.title = element_text(size = 8, face = "bold"),
+
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 7, face = "bold", color = "black"),
+    axis.text.y = element_text(face = "bold", colour = "black"),
+    axis.title = element_text(face = "bold")
+  ) +
+  guides(fill = guide_legend(ncol = 1))
+
+p_g_bac
+```
+```{r p_g_fun}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(plotly)
+library(stringr)
+library(tidyr)
+
+# dataframe
+phylum_bac <- ps_ITS_clean %>%
+  tax_glom(taxrank = "Genus") %>%
+  transform_sample_counts(function(x) x / sum(x)) %>%
+  psmelt() %>%
+  as.data.frame() %>%
+  mutate(
+    Genus = as.character(Genus),
+    Abundance = as.numeric(Abundance)
+  )
+
+# Top phyla + "Other"
+top_phyla <- phylum_bac %>%
+  group_by(Genus) %>%
+  summarise(total = sum(Abundance, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>% # top 10 
+  pull(Genus)
+
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Genus = ifelse(Genus %in% top_phyla, Genus, "Other")
+  )
+
+# change treatments
+phylum_bac <- phylum_bac %>%
+  separate(Sample, into = c("Samplingtime", "Treatment", "Block"), sep = "_") %>%
+  mutate(
+   Treatment = as.character(Treatment),
+    Treatment = ifelse(Treatment == "H20", "Mock", Treatment),
+    Treatment = ifelse(Treatment == "ECO", "Organic", Treatment),
+    Samplingtime = factor(Samplingtime, levels = c("T0", "T1")),
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Block = factor(Block)
+  )
+
+#Edit names
+phylum_bac$Genus <- phylum_bac$Genus %>%
+  str_replace("^p__", "") %>%
+  str_replace("^g__", "") %>%
+  #str_replace("^f__", "") %>%
+  str_replace("Fungi_phy_Incertae_sedis", "Unclassified Fungi") %>%
+  str_replace("Fungi_gen_Incertae_sedis", "Unclassified Fungi")%>%
+  str_replace("Chytridiomycota_gen_Incertae_sedis", "Unclassified Chytridiomycota")
+
+
+
+# order phylum and sample
+phylum_bac <- phylum_bac %>%
+  mutate(
+    Genus = factor(
+      Genus,
+      levels = phylum_bac %>%
+        group_by(Genus) %>%
+        summarise(total = sum(Abundance), .groups = "drop") %>%
+        arrange(desc(total)) %>%
+        pull(Genus)
+    ),
+    Sample_order = interaction(Treatment, Block, sep = "_"),
+    Sample_order = factor(
+      Sample_order,
+      levels = unique(Sample_order[order(Treatment, Block)])
+    )
+  )
+
+# palette
+my_colors <- c("#0072B2", "#00913F", "#D55E00", "#0032D5", "#911100",
+               "#B23B00", "#00A191", "#AAB300", "#EDAA25", "#0A7373")
+
+# plot
+p_g_fun <- ggplot(phylum_bac,
+                  aes(x = Sample_order,
+                      y = Abundance,
+                      fill = Genus)) +
+
+  geom_bar(stat = "identity", position = "fill") +
+
+  facet_grid(~Samplingtime, scales = "free_x") +
+
+  scale_y_continuous(labels = percent) +
+  labs(x = "Sample", y = "Relative Abundance (%)", title = "D") +
+
+  scale_fill_manual(
+    values = rep(my_colors, length.out = nlevels(phylum_bac$Genus))
+  ) +
+
+  scale_x_discrete(labels = function(x) str_replace(x, "_.*", "")) +
+
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(size = 10, face = "bold"),
+    panel.spacing.x = unit(0.1, "lines"),
+
+    legend.position = "right",
+    legend.text = element_text(size = 7, face = "bold"),
+    legend.title = element_text(size = 8, face = "bold"),
+
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 7, face = "bold", color = "black"),
+    axis.text.y = element_text(face = "bold", colour = "black"),
+    axis.title = element_text(face = "bold")
+  ) +
+  guides(fill = guide_legend(ncol = 1))
+
+p_g_fun
+```
+
+# Export Fig 4
+```{r, multiplot}
+#install.packages("patchwork")
+library(patchwork)
+final_fig_IV <- (p_p_bac|p_p_fun)/(p_g_bac|p_g_fun)+
+plot_layout(widths = c(1, 1), heights = c(1, 1))
+
+final_fig_IV
+
+# Pdf
+ggsave("F_IV_Composition.pdf",
+       plot = final_fig_IV,
+       width = 32, height = 18, units = "cm",
+       device = cairo_pdf)
+
+# Png
+ggsave("F_IV_Composition.png",
+       plot = final_fig_IV,
+        width = 32, height = 18, units = "cm",
+       dpi = 600)
+
+
+# tiff
+ggsave("F_IV_Composition.tiff",
+       plot = final_fig_IV,
+       width = 12,
+       height = 8,
+       dpi = 600,
+       compression = "lzw")
+```
+
+
+# Fig. V: Diversity Analysis
+## Alpha
+```{r alpha}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(multcompView)
+library(patchwork)
+
+#Prepara datos para bacterias y hongos
+# Alpha diversidad
+alpha_bac <- estimate_richness(ps_clean, measures = "Shannon")
+alpha_fun <- estimate_richness(ps_ITS_clean, measures = "Shannon")
+
+meta <- data.frame(sample_data(ps_clean))
+meta$Sample <- rownames(meta)
+
+df_bac <- alpha_bac %>%
+  mutate(Sample = rownames(alpha_bac)) %>%
+  left_join(meta, by = "Sample")
+
+#Cambiar nombres
+df_bac$Treatment <- as.character(df_bac$Treatment)
+df_bac$Treatment[df_bac$Treatment == "H2O"] <- "Mock"
+df_bac$Treatment[df_bac$Treatment == "ECOFRUT"] <- "Organic"
+# NPK se mantiene igual
+
+
+df_fun <- alpha_fun %>%
+  mutate(Sample = rownames(alpha_fun)) %>%
+  left_join(meta, by = "Sample")
+
+#Cambiar nombres
+df_fun$Treatment <- as.character(df_fun$Treatment)
+df_fun$Treatment[df_fun$Treatment == "H2O"] <- "Mock"
+df_fun$Treatment[df_fun$Treatment == "ECOFRUT"] <- "Organic"
+# NPK se mantiene igual
+
+
+# Asegurar que se manejen los factores como factores en el orden adecuado
+df_bac <- df_bac %>%
+  mutate(
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Sampling_time = factor(Sampling_time, levels = c("T0","T1")),
+    Block = factor(Block, levels = c("1","2","3","4","5"))
+  )
+
+df_fun <- df_fun %>%
+  mutate(
+    Treatment = factor(Treatment, levels = c("Mock", "Organic", "NPK")),
+    Sampling_time = factor(Sampling_time, levels = c("T0","T1")),
+    Block = factor(Block, levels = c("1","2","3","4","5"))
+  )
+
+
+#Crear función para obtener las letras de significancia a partir de modelo
+get_letters <- function(model, factor_name){
+  
+  emm <- emmeans(model, as.formula(paste("~", factor_name)))
+  cld <- multcomp::cld(emm, Letters = letters, adjust = "tukey")
+  
+  cld$.group <- gsub(" ", "", cld$.group)
+  cld$.group <- toupper(cld$.group)   # Letras mayusculas
+  
+  return(cld)
+}
+
+
+######-------- Treatment------------
+model_bac_trt <- lmer(Shannon ~ Treatment + (1|Block), data = df_bac)
+letters_bac_trt <- get_letters(model_bac_trt, "Treatment")
+
+y_max_bac <- max(df_bac$Shannon, na.rm = TRUE)
+y_max_fun <- max(df_fun$Shannon, na.rm = TRUE)
+
+summary(model_bac_trt)
+anova(model_bac_trt)
+
+pA_bac_treat <- ggplot(df_bac, aes(Treatment, Shannon, fill = Treatment)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_trt,
+          aes(x = Treatment,
+              y = y_max_bac + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_treat) +
+  labs(title = "A  ", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+
+pA_bac_treat
+
+######-------- Sampling time------------
+model_bac_time <- lmer(Shannon ~ Sampling_time + (1|Block), data = df_bac)
+letters_bac_time <- get_letters(model_bac_time, "Sampling_time")
+
+summary(model_bac_time)
+anova(model_bac_time)
+
+pB_bac_time <- ggplot(df_bac, aes(Sampling_time, Shannon, fill = Sampling_time)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_time,
+          aes(x = Sampling_time,
+              y = y_max_bac + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_time) +
+  labs(title = "B", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+pB_bac_time
+
+######-------- Block------------
+model_bac_block <- lm(Shannon ~ Block, data = df_bac)
+letters_bac_block <- get_letters(model_bac_block, "Block")
+
+summary(model_bac_block)
+anova(model_bac_block)
+
+pC_bac_blo <- ggplot(df_bac, aes(Block, Shannon, fill = Block)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_block,
+          aes(x = Block,
+              y = y_max_bac + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_blo) +
+  labs(title = "C", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+pC_bac_blo
+letters_bac_block
+
+
+
+```
+# Testing of Assumptions
+```{r}
+#Normality
+res_trt <- residuals(model_bac_trt) #trt
+shapiro.test(res_trt)
+
+res_time <- residuals(model_bac_time) #sampling time
+shapiro.test(res_time)
+
+res_blo <- residuals(model_bac_block) #block
+shapiro.test(res_blo)
+
+# Gráfico Q-Q
+qqnorm(res_trt, main = "Residuals Q-Q plot - Treatment") # trt
+qqline(res_trt)
+
+qqnorm(res_time, main = "Residuals Q-Q plot - Sampling time") # sampling time
+qqline(res_time)
+
+qqnorm(res_blo, main = "Residuals Q-Q plot - Block") # block
+qqline(res_blo)
+
+#Homogeneity of Variance
+leveneTest(Shannon ~ Treatment,  data = df_bac )
+leveneTest(Shannon ~ Sampling_time,  data = df_bac )
+leveneTest(Shannon ~ Block,  data = df_bac )
+
+fit_trt <- fitted(model_bac_trt)
+fit_time <- fitted(model_bac_time)
+fit_blo <- fitted(model_bac_block)
+
+plot(fit_blo, res_blo)
+abline(h = 0, col = "red")
+plot(fit_time, res_time)
+abline(h = 0, col = "red")
+plot(fit_trt, res_trt)
+abline(h = 0, col = "red")
+
+```
+Todos los modelos cumple con supuesto de normalidad y homogeneidad de varianza
+
+
+
+## Betta
+```{r betta}
+library(phyloseq)
+library(vegan)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+
+#1. Relative abundance
+ps.prop <- transform_sample_counts(ps_clean, function(x) x / sum(x))
+
+
+#2. Distance + NMDS
+dist_bc <- phyloseq::distance(ps.prop, method = "bray")
+
+set.seed(123)
+ord <- ordinate(ps.prop, method = "NMDS", distance = dist_bc)
+
+stress_val <- round(ord$stress, 3)
+
+#3. METADATA
+# Change names
+metadata <- metadata %>%
+  mutate(
+    Treatment = dplyr::recode(Treatment,
+                              "H2O" = "Mock",
+                              "ECOFRUT" = "Organic",
+                              "NPK" = "NPK"),
+    Treatment = factor(Treatment, levels = c("Mock", "NPK", "Organic")),
+    Sampling_time = factor(Sampling_time, levels = c("T0","T1")),
+    Block = factor(Block)
+  )
+
+sample_data(ps.prop) <- sample_data(metadata)
+# 3.2 Verificación
+#print(table(metadata$Treatment))
+#print(table(metadata$Block))
+
+
+
+
+
+
+#4.PERMANOVAS
+
+#4.1 Modelo para treatment
+perm_trt <- adonis2(
+  dist_bc ~ Treatment,
+  data = metadata,
+  permutations = 999
+)
+
+#4.2 Modelo para sampling time
+perm_time <- adonis2(
+  dist_bc ~ Sampling_time,
+  data = metadata,
+  permutations = 999
+)
+
+#4.3 Evalúa el efecto solo del bloque. EMpleado para reportar la varianza explicada por el bloque.
+perm_block <- adonis2(
+  dist_bc ~ Block,
+  data = metadata,
+  permutations = 999
+)
+
+#5. función para extraer R2 y p value
+get_perm_text <- function(df_row){
+  paste0("R² = ", round(df_row$R2,3),
+         ", p = ", signif(df_row$`Pr(>F)`,3))
+}
+
+#6.Etiquetas que se presentarán en el gráfico
+lab_trt  <- paste0("PERMANOVA: ", get_perm_text(perm_trt[1,]))#peRMANOVA TREATMENT
+lab_time <- paste0("PERMANOVA: ", get_perm_text(perm_time[1,]))#PERMANOVA SAMPLING TIME
+lab_block<- paste0("PERMANOVA: ", get_perm_text(perm_block[1,]))#PERMANOVA BLOQUE
+
+
+#7. Análisis de dispersión (betadisper)
+#importante porque un PERMANOVA significativo puede estar influenciado por diferencias de dispersión y no solo por diferencias de centroides
+bd_trt  <- betadisper(dist_bc, metadata$Treatment)
+bd_time <- betadisper(dist_bc, metadata$Sampling_time)
+bd_block<- betadisper(dist_bc, metadata$Block)
+
+disp_trt  <- anova(bd_trt)
+disp_time <- anova(bd_time)
+disp_block<- anova(bd_block)
+
+disp_text_trt  <- paste0("Disp p = ", signif(disp_trt$`Pr(>F)`[1],3))
+disp_text_time <- paste0("Disp p = ", signif(disp_time$`Pr(>F)`[1],3))
+disp_text_block<- paste0("Disp p = ", signif(disp_block$`Pr(>F)`[1],3))
+
+
+#8. NMDS PLOTS
+
+
+##  A. Treatment
+p_trt <- plot_ordination(ps.prop, ord, color = "Treatment") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Treatment), linewidth = 0.9) +
+  scale_color_manual(values = palette_treat) +
+  theme_pub +
+  #ggtitle("A  Treatment") +
+  annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+           label = paste(lab_trt, disp_text_trt, sep="\n"),
+           size=4) 
+
+##  B. Sampling time
+p_time <- plot_ordination(ps.prop, ord, color = "Sampling_time") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Sampling_time), linewidth = 0.9) +
+  scale_color_manual(values = palette_time) +
+  theme_pub +
+  #ggtitle("B  Sampling time") +
+  annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+           label = paste(lab_time, disp_text_time, sep="\n"),
+           size=4)
+
+##  C. Block
+p_block <- plot_ordination(ps.prop, ord, color = "Block") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Block), linewidth = 0.9) +
+  scale_color_manual(values = palette_blo) +
+  theme_pub +
+ # ggtitle("C  Block") +
+    annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+            label = paste(lab_block, disp_text_block, sep="\n"),
+           size=4)
+p_trt
+```
+
+
+# Export Fig 5
+```{r, multiplot}
+library(patchwork)
+
+final_fV <- ((pA_bac_treat | pB_bac_time | pC_bac_blo)/(p_trt | p_time | p_block)) +
+  plot_layout(guides = "collect") 
+final_fV
+
+# Pdf
+pdf("F_V_Diversity.pdf", width = 16, height = 8)  # tamaño en pulgadas
+print(final_fV)  # objeto ggplot
+dev.off()
+
+# Png
+ggsave("F_V_Diversity.png",
+       plot = final_fV,
+       width = 16,
+       height = 8,
+       dpi = 300)  # 300 = calidad publicación
+
+
+# tiff
+ggsave("F_V_Diversity.tiff",
+       plot = final_fV,
+       width = 16,
+       height = 8,
+       dpi = 300,
+       compression = "lzw")
+```
+
+#----------- Fig. S2: Fungical Diversity
+
+```{r alpha fun}
+######-------- Treatment------------
+model_fun_trt <- lmer(Shannon ~ Treatment + (1|Block), data = df_fun)
+letters_bac_trt <- get_letters(model_fun_trt, "Treatment")
+
+y_max_fun <- max(df_fun$Shannon, na.rm = TRUE)
+
+summary(model_fun_trt)
+anova(model_fun_trt)
+
+pA_fun_treat <- ggplot(df_fun, aes(Treatment, Shannon, fill = Treatment)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_trt,
+          aes(x = Treatment,
+              y = y_max_fun + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_treat) +
+  labs(title = "A  ", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+
+pA_fun_treat
+
+######-------- Sampling time------------
+model_fun_time <- lmer(Shannon ~ Sampling_time + (1|Block), data = df_fun)
+letters_bac_time <- get_letters(model_fun_time, "Sampling_time")
+
+summary(model_fun_time)
+anova(model_fun_time)
+
+pB_fun_time <- ggplot(df_fun, aes(Sampling_time, Shannon, fill = Sampling_time)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_time,
+          aes(x = Sampling_time,
+              y = y_max_fun + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_time) +
+  labs(title = "B", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+pB_fun_time
+
+######-------- Block------------
+model_fun_block <- lm(Shannon ~ Block , data = df_fun)
+letters_bac_block <- get_letters(model_fun_block, "Block")
+
+anova(model_fun_block)
+summary(model_fun_block)
+
+pC_fun_blo <- ggplot(df_fun, aes(Block, Shannon, fill = Block)) +
+  geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+  geom_point(position = position_jitter(width = 0.15), size = 2) +
+  geom_text(data = letters_bac_block,
+          aes(x = Block,
+              y = y_max_fun + 0.2,   # ubicación vertical de letras
+              label = .group),
+          inherit.aes = FALSE,
+          size = 5) +
+  scale_fill_manual(values = palette_blo) +
+  labs(title = "C", y = "Shannon index") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid = element_blank(), legend.position = "none")
+pC_fun_blo
+
+```
+# Testing of Assumptions
+```{r}
+#Normality
+res_trt <- residuals(model_fun_trt) #trt
+shapiro.test(res_trt)
+
+res_time <- residuals(model_fun_time) #sampling time
+shapiro.test(res_time)
+
+res_blo <- residuals(model_fun_block) #block
+shapiro.test(res_blo)
+
+# Gráfico Q-Q
+qqnorm(res_trt, main = "Residuals Q-Q plot - Treatment") # trt
+qqline(res_trt)
+
+qqnorm(res_time, main = "Residuals Q-Q plot - Sampling time") # sampling time
+qqline(res_time)
+
+qqnorm(res_blo, main = "Residuals Q-Q plot - Block") # block
+qqline(res_blo)
+
+#Homogeneity of Variance
+leveneTest(Shannon ~ Treatment,  data = df_fun )
+leveneTest(Shannon ~ Sampling_time,  data = df_fun )
+leveneTest(Shannon ~ Block,  data = df_fun )
+
+fit_trt <- fitted(model_fun_trt)
+fit_time <- fitted(model_fun_time)
+fit_blo <- fitted(model_fun_block)
+
+plot(fit_blo, res_blo)
+abline(h = 0, col = "red")
+plot(fit_time, res_time)
+abline(h = 0, col = "red")
+plot(fit_trt, res_trt)
+abline(h = 0, col = "red")
+
+```
+
+```{r}
+library(phyloseq)
+library(vegan)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+
+#1. Relative abundance
+ps.prop <- transform_sample_counts(ps_ITS_clean, function(x) x / sum(x))
+
+
+#2. DISTANCE + NMDS
+dist_bc <- phyloseq::distance(ps.prop, method = "bray")
+
+set.seed(123)
+ord <- ordinate(ps.prop, method = "NMDS", distance = dist_bc)
+
+stress_val <- round(ord$stress, 3)
+
+#3. METADATA
+metadata <- data.frame(sample_data(ps.prop))
+metadata$Sample <- rownames(metadata)
+
+# Cambiar los nombres
+metadata <- metadata %>%
+  mutate(
+    Treatment = dplyr::recode(Treatment,
+                              "H2O" = "Mock",
+                              "ECOFRUT" = "Organic",
+                              "NPK" = "NPK"),
+    Treatment = factor(Treatment, levels = c("Mock", "NPK", "Organic")),
+    Sampling_time = factor(Sampling_time, levels = c("T0","T1")),
+    Block = factor(Block)
+  )
+
+sample_data(ps.prop) <- sample_data(metadata)
+
+
+# PERMANOVAS
+#--------------------------------------------------
+#Modelo para treatment
+perm_trt <- adonis2(
+  dist_bc ~ Treatment,
+  data = metadata,
+  permutations = 999
+)
+
+#Modelo para sampling time
+perm_time <- adonis2(
+  dist_bc ~ Sampling_time,
+  data = metadata,
+  permutations = 999
+)
+
+#Evalúa el efecto solo del bloque. EMpleado para reportar la varianza explicada por el bloque.
+perm_block <- adonis2(
+  dist_bc ~ Block,
+  data = metadata,
+  permutations = 999
+)
+
+# función para extraer R2 y p value
+get_perm_text <- function(df_row){
+  paste0("R² = ", round(df_row$R2,3),
+         ", p = ", signif(df_row$`Pr(>F)`,3))
+}
+
+#Etiquetas que se presentarán en el gráfico
+lab_trt  <- paste0("PERMANOVA: ", get_perm_text(perm_trt[1,]))#peRMANOVA TREATMENT
+lab_time <- paste0("PERMANOVA: ", get_perm_text(perm_time[1,]))#PERMANOVA SAMPLING TIME
+lab_block<- paste0("PERMANOVA: ", get_perm_text(perm_block[1,]))#PERMANOVA BLOQUE
+
+
+#5. Análisis de dispersión (betadisper)
+#importante porque un PERMANOVA significativo puede estar influenciado por diferencias de dispersión y no solo por diferencias de centroides
+bd_trt  <- betadisper(dist_bc, metadata$Treatment)
+bd_time <- betadisper(dist_bc, metadata$Sampling_time)
+bd_block<- betadisper(dist_bc, metadata$Block)
+
+disp_trt  <- anova(bd_trt)
+disp_time <- anova(bd_time)
+disp_block<- anova(bd_block)
+
+disp_text_trt  <- paste0("Disp p = ", signif(disp_trt$`Pr(>F)`[1],3))
+disp_text_time <- paste0("Disp p = ", signif(disp_time$`Pr(>F)`[1],3))
+disp_text_block<- paste0("Disp p = ", signif(disp_block$`Pr(>F)`[1],3))
+
+
+#6. NMDS PLOTS
+
+
+##  A. Treatment
+
+p_trt <- plot_ordination(ps.prop, ord, color = "Treatment") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Treatment), linewidth = 0.9) +
+  scale_color_manual(values = palette_treat) +
+  theme_pub +
+  #ggtitle("A  Treatment") +
+  annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+           label = paste(lab_trt, disp_text_trt, sep="\n"),
+           size=4) 
+
+##  B. Sampling time
+p_time <- plot_ordination(ps.prop, ord, color = "Sampling_time") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Sampling_time), linewidth = 0.9) +
+  scale_color_manual(values = palette_time) +
+  theme_pub +
+  #ggtitle("B  Sampling time") +
+  annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+           label = paste(lab_time, disp_text_time, sep="\n"),
+           size=4)
+
+##  C. Block
+# Convertir la columna Block a factor dentro de sample_data
+sample_data(ps.prop)$Block <- as.factor(sample_data(ps.prop)$Block)
+
+p_block <- plot_ordination(ps.prop, ord, color = "Block") +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(group = Block), linewidth = 0.9) +
+  scale_color_manual(values = palette_blo) +
+  theme_pub +
+ # ggtitle("C  Block") +
+    annotate("text", x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -1,
+            label = paste(lab_block, disp_text_block, sep="\n"),
+           size=4)
+
+p_trt
+```
+
+# Export Fig S2
+```{r, multiplot}
+library(patchwork)
+
+final_s2 <- ((pA_fun_treat | pB_fun_time | pC_fun_blo)/(p_trt | p_time | p_block)) +
+  plot_layout(guides = "collect") 
+final_s2
+
+# Pdf
+pdf("F_V_Diversity.pdf", width = 16, height = 8)  # tamaño en pulgadas
+print(final_s2)  # objeto ggplot
+dev.off()
+
+# Png
+ggsave("F_V_Diversity.png",
+       plot = final_s2,
+       width = 16,
+       height = 8,
+       dpi = 300)  # 300 = calidad publicación
+
+
+# tiff
+ggsave("F_V_Diversity.tiff",
+       plot = final_s2,
+       width = 16,
+       height = 8,
+       dpi = 300,
+       compression = "lzw")
+```
+
+
+#----------------- Fig. VI: RDA 
+
+```{r}
+library(vegan)
+library(dplyr)
+
+#1. Extraer metadata y los convierte un dataframe usamos mismos metadatos apra hongos y bacterias
+meta <- as(sample_data(ps_clean), "data.frame")
+
+#2. asegurar que variables categóricas sean factores
+meta$Block <- as.factor(meta$Block)
+meta$Treatment <- as.factor(meta$Treatment)
+meta$Sampling_time <- as.factor(meta$Sampling_time)
+
+#2.1 y que las numericas sean numericas
+meta2 <- meta %>%
+  mutate(across(-c(Sample, Treatment, Block, Sampling_time), as.numeric))
+
+#3. Extraer tabla de ASVs
+otu_bac <- as.data.frame(otu_table(ps_clean))
+otu_fun <- as.data.frame(otu_table(ps_ITS_clean))
+
+
+
+#4. Transformación d eHellinger: transforma datos de abundancia en 0 y para analisis multivariado
+otu_hell_bac <- decostand(otu_bac, method = "hellinger")
+otu_hell_fun <- decostand(otu_fun, method = "hellinger")
+
+#5. Escalar variables de metadatos para poder compararlas ya que tienen diferentes unidades
+meta_scaled <- meta2 %>%
+  mutate(across(where(is.numeric), scale))
+
+#6. correr modelo bacterias
+
+rda_model_bac <- rda(otu_hell_bac~ Treatment+ Block+ Sampling_time + pH + EC + ECEC + BS + OM + Clay + Ex_Ac + Fe + Mn + Cu + Zn + B + P + S +  Na_Sat +  K_Sat,
+  data = meta_scaled)
+
+
+#6. correr modelo Hongos
+
+rda_model_fun <- rda(otu_hell_fun~ Treatment+ Block+ Sampling_time + pH + EC + ECEC + BS + OM + Clay + Ex_Ac + Fe + Mn + Cu + Zn + B + P + S +  Na_Sat +  K_Sat,
+  data = meta_scaled)
+
+#4. Extraer varianza explicada
+#Bacterias
+var_exp_bac <- summary(rda_model_bac)$cont$importance[2, 1:2] * 100
+var_exp_bac
+
+#Hongos
+var_exp_fun <- summary(rda_model_fun)$cont$importance[2, 1:2] * 100
+var_exp_fun
+
+```
+#Seleccionar mejor modelo bacterias
+```{r}
+rda_null_bac <- rda(otu_hell_bac ~ 1, data = meta_scaled)  # solo intercepto
+
+rda_model_bac <- rda(otu_hell_bac~ Treatment+ Block+ Sampling_time + pH + EC + ECEC + BS + OM + Clay + Ex_Ac + Fe + Mn + Cu + Zn + B + P + S +  Na_Sat +  K_Sat,
+  data = meta_scaled) #modelo completo
+
+#Stepwise
+step_model_bac <- ordistep(rda_null_bac, scope = formula(rda_model_bac), direction = "both", trace = TRUE)
+
+```
+#Ver estadísticas del mejor modelo
+```{r}
+step_model_bac$anova
+```
+```{r}
+#Mejor modelo
+rda_best_mod_bac <- rda(otu_hell_bac ~ Sampling_time + Ex_Ac + Clay + Fe + Block , data = meta_scaled)
+anova(rda_best_mod_bac, permutations = 999)
+
+R2<-RsquareAdj(rda_best_mod)
+R2
+```
+# plot
+
+#Bacterias
+```{r plot_RDA_bac}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+
+# 1. Varianza explicada
+var_exp <- summary(rda_best_mod_bac)$cont$importance[2, 1:2] * 100
+
+# 2. p-value del modelo
+anova_res <- anova.cca(rda_best_mod_bac, permutations = 999)
+p_val <- anova_res$`Pr(>F)`[1]
+
+# 3. R2 ajustado
+r2_adj <- RsquareAdj(rda_best_mod_bac)$adj.r.squared
+
+# 4. Crear etiqueta de texto
+label_text <- paste0(
+  "R² adj = ", round(r2_adj, 3),
+  "\n",
+  "p = ", signif(p_val, 3)
+)
+
+# 5. Coordenadas de sitios
+sites <- scores(rda_best_mod_bac, display = "sites", scaling = 2) %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleId")
+
+sites <- left_join(sites, meta_scaled %>% rownames_to_column("SampleId"), by = "SampleId")
+
+# 6. Coordenadas de variables
+biplot <- scores(rda_best_mod_bac, display = "bp", scaling = 2) %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable")
+
+# 7. Calcular posición superior derecha dinámica
+x_pos <- max(sites$RDA1) * 2.5
+y_pos <- max(sites$RDA2) * 0.9
+
+# 8. Graficar
+RDA_bac <- ggplot(sites, aes(x = RDA1, y = RDA2, color = Sampling_time)) +
+  geom_point(size = 3, alpha = 0.8) +
+  
+  geom_segment(data = biplot,
+               aes(x = 0, y = 0, xend = RDA1, yend = RDA2),
+               arrow = arrow(length = unit(0.25, "cm")),
+               color = "gray30") +
+  
+  geom_text(data = biplot,
+            aes(x = RDA1 * 1.1, y = RDA2 * 1.1, label = Variable),
+            size = 4, color = "black") +
+  
+  # Texto con R2 y p-value
+  annotate("text",
+           x = x_pos,
+           y = y_pos,
+           label = label_text,
+           hjust = 1,
+           size = 5) +
+  
+  labs(
+    x = paste0("RDA1 (", round(var_exp[1], 1), "%)"),
+    y = paste0("RDA2 (", round(var_exp[2], 1), "%)"),
+    title = "A",
+    color = "Sampling_time"
+  ) +
+  scale_color_manual(values=palette_time)+
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank(),
+    axis.line = element_line(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+RDA_bac
+```
+#Seleccionar mejor modelo hongos
+```{r}
+rda_null_fun <- rda(otu_hell_fun ~ 1, data = meta_scaled)  # solo intercepto
+
+rda_model_fun <- rda(otu_hell_fun~ Treatment+ Block+ Sampling_time + pH + EC + ECEC + BS + OM + Clay + Ex_Ac + Fe + Mn + Cu + Zn + B + P + S +  Na_Sat +  K_Sat,
+  data = meta_scaled) #modelo completo
+
+#Stepwise
+step_model_fun <- ordistep(rda_null_fun, scope = formula(rda_model_fun), direction = "both", trace = TRUE)
+
+```
+#Ver estadísticas del mejor modelo para hongos
+```{r}
+step_model_fun$anova
+```
+
+```{r}
+#Mejor modelo
+rda_best_mod_fun <- rda(otu_hell_fun ~ Sampling_time + B+ Fe + Block , data = meta_scaled)
+anova(rda_best_mod_fun, permutations = 999)
+
+R2<-RsquareAdj(rda_best_mod_fun)
+R2
+```
+
+#GRaficar modelo hongos
+```{r}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+
+# 1. Varianza explicada
+var_exp <- summary(rda_best_mod_fun)$cont$importance[2, 1:2] * 100
+
+# 2. p-value del modelo
+anova_res <- anova.cca(rda_best_mod_fun, permutations = 999)
+p_val <- anova_res$`Pr(>F)`[1]
+
+# 3. R2 ajustado
+r2_adj <- RsquareAdj(rda_best_mod_fun)$adj.r.squared
+
+# 4. Crear etiqueta de texto
+label_text <- paste0(
+  "R² adj = ", round(r2_adj, 3),
+  "\n",
+  "p = ", signif(p_val, 3)
+)
+
+# 5. Coordenadas de sitios
+sites <- scores(rda_best_mod_fun, display = "sites", scaling = 2) %>%
+  as.data.frame() %>%
+  rownames_to_column("SampleId")
+
+sites <- left_join(sites, meta_scaled %>% rownames_to_column("SampleId"), by = "SampleId")
+
+# 6. Coordenadas de variables
+biplot <- scores(rda_best_mod_fun, display = "bp", scaling = 2) %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable")
+
+# 7. Calcular posición superior derecha dinámica
+x_pos <- max(sites$RDA1) * 2.5
+y_pos <- max(sites$RDA2) * 0.9
+
+# 8. Graficar
+RDA_fun <- ggplot(sites, aes(x = RDA1, y = RDA2, color = Sampling_time)) +
+  geom_point(size = 3, alpha = 0.8) +
+  
+  geom_segment(data = biplot,
+               aes(x = 0, y = 0, xend = RDA1, yend = RDA2),
+               arrow = arrow(length = unit(0.25, "cm")),
+               color = "gray30") +
+  
+  geom_text(data = biplot,
+            aes(x = RDA1 * 1.1, y = RDA2 * 1.1, label = Variable),
+            size = 4, color = "black") +
+  
+  #Texto con R2 y p-value
+  annotate("text",
+           x = x_pos,
+           y = y_pos,
+           label = label_text,
+           hjust = 1,
+           size = 5) +
+  
+  labs(
+    x = paste0("RDA1 (", round(var_exp[1], 1), "%)"),
+    y = paste0("RDA2 (", round(var_exp[2], 1), "%)"),
+    title = "B",
+    color = "Sampling_time"
+  ) +
+  scale_color_manual(values=palette_time)+
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank(),
+    axis.line = element_line(),
+    plot.title = element_text(hjust = 0.5)
+  )
+RDA_fun
+```
+
+
+# Exportar RDA (Fig 6)
+```{r, multiplot}
+#install.packages("patchwork")   # solo la primera vez
+library(patchwork)
+
+final_RDA <- (RDA_bac | RDA_fun ) +
+  plot_layout(guides = "collect") 
+final_RDA
+
+
+#Exportar Pdf
+pdf("F_VI_RDA.pdf", width = 16, height = 6)  # tamaño en pulgadas
+print(final_RDA)  # objeto ggplot
+dev.off()
+
+#Exportar Png
+ggsave("F_VI_RDA.png",
+       plot = final_RDA,
+       width = 16,
+       height = 6,
+       dpi = 300)  # 300 = calidad publicación
+
+
+#Exportar tiff
+ggsave("F_VI_RDA.tiff",
+       plot = final_RDA,
+       width = 16,
+       height = 6,
+       dpi = 300,
+       compression = "lzw")
+```
